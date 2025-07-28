@@ -109,7 +109,16 @@ func someUsefulThings() {
 // A Go struct is like a Python or Java class - it can have attributes
 // (e.g. like the Username attribute) and methods (e.g. like the StoreFile method below).
 type User struct {
-	Username string
+	Username     string
+	userUUID     uuid.UUID
+	masterKey    []byte
+	masterEncKey []byte
+	publicKey    userlib.PKEEncKey
+	verifyKey    userlib.DSVerifyKey
+	SignKey      userlib.DSSignKey
+	PrivateKey   userlib.PKEDecKey
+
+	fileMapKey []byte
 
 	// You can add other attributes here if you want! But note that in order for attributes to
 	// be included when this struct is serialized to/from JSON, they must be capitalized.
@@ -119,31 +128,164 @@ type User struct {
 	// begins with a lowercase letter).
 }
 
+type FileMap struct {
+	FileMetaDataUUID uuid.UUID
+	OwnerName        string
+	FileMetakey      []byte
+}
+type FileMetaData struct {
+	OwnerUserName       string
+	FileBlockHeaderUUID uuid.UUID
+	FileBlockKey        []byte
+}
+type FileBlockHeader struct {
+	FirstUUID      uuid.UUID
+	LastUUID       uuid.UUID
+	FileContentKey []byte
+}
+type FileContent struct {
+	Content  []byte
+	NextUUID uuid.UUID
+}
+
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
+	// get the user and put it to userdata
 	var userdata User
 	userdata.Username = username
+	//create master key and enc key for userUUID
+	userdata.masterKey = userlib.Argon2Key([]byte(password), []byte(username), 16)
+	masterEncKey, _ := userlib.HashKDF(userdata.masterKey, []byte("user"))
+	userdata.masterEncKey = masterEncKey[:16]
+	//create all keys that I need.
+	userdata.publicKey, userdata.PrivateKey, _ = userlib.PKEKeyGen()
+	userdata.SignKey, userdata.verifyKey, _ = userlib.DSKeyGen()
+	//put public and verify key to the keyStore
+	userlib.KeystoreSet(username+"public key", userdata.publicKey)
+	userlib.KeystoreSet(username+"verify key", userdata.verifyKey)
+	//get the UUID for use
+	userdata.userUUID, _ = uuid.FromBytes(userlib.Hash([]byte(userdata.Username)))
+	//Marshal the userdata object
+	userdatabytes, _ := json.Marshal(userdata)
+	//encry userdata json
+	ciphertext := userlib.SymEnc(userdata.masterEncKey, userlib.RandomBytes(16), userdatabytes)
+	//sig it
+	sig, _ := userlib.DSSign(userdata.SignKey, ciphertext)
+	//Store it to dataStore
+	// for userUUID, the first 256 bytes is sig.
+	userlib.DatastoreSet(userdata.userUUID, append(sig, ciphertext...))
+
 	return &userdata, nil
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
+	// find UUID based on username
+	targetUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username)))
+	// get value from the UUID
+	bytes, _ := userlib.DatastoreGet(targetUUID)
+	// sperate the sig and content from bytes
+	sig := bytes[0:256]
+	encJsonBytes := bytes[256:]
+	//get verify key from Keystore
+	verifyKey, _ := userlib.KeystoreGet(username + "verify key")
+	// verifty the value, make sure no attack
+	err = userlib.DSVerify(verifyKey, encJsonBytes, sig)
+	if err != nil {
+		return nil, err
+	}
+
+	//get the master key and master enc key
+	masterKey := userlib.Argon2Key([]byte(password), []byte(username), 16)
+	masterEncKey, _ := userlib.HashKDF(masterKey, []byte("user"))
+	masterEncKey = masterEncKey[:16]
+	//decry the ciperjsonbytes and get the json
+	jsonBytes := userlib.SymDec(masterEncKey, encJsonBytes)
+	// transfer json to interface, now we have usedata object
+	err = json.Unmarshal(jsonBytes, &userdata)
+	if err != nil {
+		return nil, err
+	}
+	// giving all the variable back to userdata
+	userdata.userUUID = targetUUID
+	userdata.masterKey = masterKey
+	userdata.masterEncKey = masterEncKey
+	userdata.verifyKey = verifyKey
+	//get the public key
+	publicKey, _ := userlib.KeystoreGet(username + "public key")
+	// giving value back to userdata
+	userdata.publicKey = publicKey
+	//make a pointer for single client device
 	userdataptr = &userdata
 	return userdataptr, nil
 }
 
 func (userdata *User) StoreFile(filename string, content []byte) (err error) {
-	storageKey, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
+	// get the exactly UUID for the fileName and user
+	fileUUID, err := uuid.FromBytes(userlib.Hash([]byte(filename + userdata.Username))[:16])
 	if err != nil {
 		return err
 	}
-	contentBytes, err := json.Marshal(content)
-	if err != nil {
-		return err
-	}
-	userlib.DatastoreSet(storageKey, contentBytes)
-	return
+	//initial FileMap fix later here
+	var fileMap FileMap
+	fileMap.OwnerName = userdata.Username
+
+	fileBlockHeaderUUID := uuid.New()
+	fileMap.FileMetaDataUUID = fileBlockHeaderUUID
+	fileBlockKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileBlockHeader"))
+	fileBlockKey = fileBlockKey[:16]
+	fileMap.FileMetakey = fileBlockKey
+
+	//create fileMapKey and ready to encry fileMap
+	fileMapKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileMap"))
+	fileMapKey = fileMapKey[0:16]
+
+	fileMapjson, _ := json.Marshal(fileMap)
+	ciphertext := userlib.SymEnc(fileMapKey, userlib.RandomBytes(16), fileMapjson)
+	hmac, _ := userlib.HMACEval(fileMapKey, ciphertext)
+	//64 bytes hamc
+	fileMapBytes := append(hmac, ciphertext...)
+
+	//store fileMapBytes to datastore
+	userlib.DatastoreSet(fileUUID, fileMapBytes)
+
+	//initial FileBlockHeader
+	var fileBlockHeader FileBlockHeader
+	fileContentKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileContent"))
+	fileContentKey = fileContentKey[:16]
+	fileBlockHeader.FileContentKey = fileContentKey
+	firstUUID := uuid.New()
+	lastUUID := uuid.New()
+	fileBlockHeader.FirstUUID = firstUUID
+	fileBlockHeader.LastUUID = lastUUID
+
+	fileBlockHeaderjson, _ := json.Marshal(fileBlockHeader)
+	ciphertext = userlib.SymEnc(fileBlockKey, userlib.RandomBytes(16), fileBlockHeaderjson)
+	hmac, _ = userlib.HMACEval(fileBlockKey, ciphertext)
+	fileBlockHeaderBytes := append(hmac, ciphertext...)
+
+	userlib.DatastoreSet(fileBlockHeaderUUID, fileBlockHeaderBytes)
+
+	//first fileContent
+	var firstFileContent FileContent
+	firstFileContent.Content = content
+	firstFileContent.NextUUID = lastUUID
+
+	firstFileContentjson, _ := json.Marshal(firstFileContent)
+	ciphertext = userlib.SymEnc(fileContentKey, userlib.RandomBytes(16), firstFileContentjson)
+	hmac, _ = userlib.HMACEval(fileContentKey, ciphertext)
+	firstFileContentBytes := append(hmac, ciphertext...)
+	userlib.DatastoreSet(firstUUID, firstFileContentBytes)
+	// last fileContent
+	var lastFileContent FileContent
+	lastFileContent.NextUUID = uuid.New()
+	lastFileContentjson, _ := json.Marshal(lastFileContent)
+	ciphertext = userlib.SymEnc(fileContentKey, userlib.RandomBytes(16), lastFileContentjson)
+	hmac, _ = userlib.HMACEval(fileContentKey, ciphertext)
+	lastFileContentBytes := append(hmac, ciphertext...)
+	userlib.DatastoreSet(lastUUID, lastFileContentBytes)
+	return nil
 }
 
 func (userdata *User) AppendToFile(filename string, content []byte) error {
