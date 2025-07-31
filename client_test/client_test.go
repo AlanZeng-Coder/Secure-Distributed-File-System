@@ -230,15 +230,6 @@ var _ = Describe("Client Tests", func() {
 			err = alice.RevokeAccess(aliceFile, "bob")
 			Expect(err).To(BeNil())
 
-			userlib.DebugMsg("Checking that the revoked users cannot append to the file.")
-			err = bob.AppendToFile(bobFile, []byte(contentTwo))
-			userlib.DebugMsg(err.Error())
-			Expect(err).ToNot(BeNil())
-
-			err = charles.AppendToFile(charlesFile, []byte(contentTwo))
-			userlib.DebugMsg(err.Error())
-			Expect(err).ToNot(BeNil())
-
 			userlib.DebugMsg("Checking that Alice can still load the file.")
 			data, err = alice.LoadFile(aliceFile)
 			Expect(err).To(BeNil())
@@ -246,13 +237,17 @@ var _ = Describe("Client Tests", func() {
 
 			userlib.DebugMsg("Checking that Bob/Charles lost access to the file.")
 			_, err = bob.LoadFile(bobFile)
-			userlib.DebugMsg(err.Error())
 			Expect(err).ToNot(BeNil())
 
 			_, err = charles.LoadFile(charlesFile)
-			userlib.DebugMsg(err.Error())
 			Expect(err).ToNot(BeNil())
 
+			userlib.DebugMsg("Checking that the revoked users cannot append to the file.")
+			err = bob.AppendToFile(bobFile, []byte(contentTwo))
+			Expect(err).ToNot(BeNil())
+
+			err = charles.AppendToFile(charlesFile, []byte(contentTwo))
+			Expect(err).ToNot(BeNil())
 		})
 
 	})
