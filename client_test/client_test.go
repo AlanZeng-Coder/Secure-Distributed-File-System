@@ -529,6 +529,13 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 
 			})
+
+			Specify("An invitation with nonexist file should return not nil", func() {
+				userlib.DebugMsg("Alice shares with Bob.")
+				_, err := alice.CreateInvitation("nonexist.txt", "bob")
+				Expect(err).ToNot(BeNil())
+
+			})
 			Specify("Accepting an invitation for a filename that already exists should fail.", func() {
 				userlib.DebugMsg("Bob creates his own file named 'bobFile.txt'.")
 				err = bob.StoreFile(bobFile, []byte("bobs original file"))
