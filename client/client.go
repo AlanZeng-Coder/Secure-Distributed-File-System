@@ -156,6 +156,14 @@ type FileContent struct {
 // NOTE: The following methods have toy (insecure!) implementations.
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
+	if username == "" {
+		return nil, fmt.Errorf("User name should not be empty")
+	}
+	_, ok := userlib.KeystoreGet(username + "public key")
+	if ok {
+		return nil, fmt.Errorf("User is exist")
+	}
+
 	// get the user and put it to userdata
 	var userdata User
 	userdata.Username = username
@@ -185,32 +193,48 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 }
 
 func GetUser(username string, password string) (userdataptr *User, err error) {
+	verifyKey, ok := userlib.KeystoreGet(username + "verify key")
+	if !ok {
+		return nil, fmt.Errorf("user is not exist")
+	}
 	var userdata User
 	// find UUID based on username
-	targetUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
+	targetUUID, err := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
+	if err != nil {
+		return nil, err
+	}
 	// get value from the UUID
-	bytes, _ := userlib.DatastoreGet(targetUUID)
+	bytes, ok := userlib.DatastoreGet(targetUUID)
+	if !ok {
+		return nil, fmt.Errorf("file got delete by attacker")
+	}
+	if len(bytes) < 256 {
+		return nil, fmt.Errorf("got modify")
+	}
 	// sperate the sig and content from bytes
 	sig := bytes[0:256]
 	encJsonBytes := bytes[256:]
 	//get verify key from Keystore
-	verifyKey, _ := userlib.KeystoreGet(username + "verify key")
+
 	// verifty the value, make sure no attack
 	err = userlib.DSVerify(verifyKey, encJsonBytes, sig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("got modift")
 	}
 
 	//get the master key and master enc key
 	masterKey := userlib.Argon2Key([]byte(password), []byte(username), 16)
-	masterEncKey, _ := userlib.HashKDF(masterKey, []byte("user"))
+	masterEncKey, err := userlib.HashKDF(masterKey, []byte("user"))
+	if err != nil {
+		return nil, err
+	}
 	masterEncKey = masterEncKey[:16]
 	//decry the ciperjsonbytes and get the json
 	jsonBytes := userlib.SymDec(masterEncKey, encJsonBytes)
 	// transfer json to interface, now we have usedata object
 	err = json.Unmarshal(jsonBytes, &userdata)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("password is wrong")
 	}
 	// giving all the variable back to userdata
 	userdata.userUUID = targetUUID
@@ -218,7 +242,10 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	userdata.masterEncKey = masterEncKey
 	userdata.verifyKey = verifyKey
 	//get the public key
-	publicKey, _ := userlib.KeystoreGet(username + "public key")
+	publicKey, ok := userlib.KeystoreGet(username + "public key")
+	if !ok {
+		return nil, fmt.Errorf("there is no this kind of public key")
+	}
 	// giving value back to userdata
 	userdata.publicKey = publicKey
 	//make a pointer for single client device
@@ -338,6 +365,9 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		dataJson, ok := userlib.DatastoreGet(fileMapUUID)
 		if !ok {
 			return errors.New(strings.ToTitle("file not found"))
+		}
+		if len(dataJson) < 64 {
+			return fmt.Errorf("fileMap got modify")
 		}
 		hmac := dataJson[0:64]
 		dataJson = dataJson[64:]
@@ -639,14 +669,15 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 
 		}
 	}
+
 	//get the fileBlockHeader info
 	fileBlockerHeaderUUID := fileMetaData.FileBlockHeaderUUID
 	fileBlockKey := fileMetaData.FileBlockKey
-
 	dataJson, ok = userlib.DatastoreGet(fileBlockerHeaderUUID)
 	if !ok {
 		return nil, errors.New(strings.ToTitle("file not found"))
 	}
+
 	hmac = dataJson[0:64]
 	dataJson = dataJson[64:]
 	computerHmac, _ = userlib.HMACEval(fileBlockKey, dataJson)
@@ -668,6 +699,7 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 
 	for targetUUID != lastUUID {
 		dataJson, ok = userlib.DatastoreGet(targetUUID)
+		userlib.DebugMsg("Hello" + string(content))
 		if !ok {
 			return nil, errors.New(strings.ToTitle("file not found"))
 		}
@@ -1373,7 +1405,7 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	hmac, _ = userlib.HMACEval(fileMapKey, ciphertext)
 	userlib.DatastoreSet(fileMapUUID, append(hmac, ciphertext...))
 
-	// 12. Update SharingTree
+	// Update SharingTree
 	sharingTreeJSON, err := json.Marshal(sharingTree)
 	if err != nil {
 		return err
