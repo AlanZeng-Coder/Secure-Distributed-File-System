@@ -53,7 +53,7 @@ var _ = Describe("Client Tests", func() {
 	var alice *client.User
 	var bob *client.User
 	var charles *client.User
-	// var doris *client.User
+	//var doris *client.User
 	// var eve *client.User
 	// var frank *client.User
 	// var grace *client.User
@@ -71,7 +71,7 @@ var _ = Describe("Client Tests", func() {
 	aliceFile := "aliceFile.txt"
 	bobFile := "bobFile.txt"
 	charlesFile := "charlesFile.txt"
-	// dorisFile := "dorisFile.txt"
+	//dorisFile := "dorisFile.txt"
 	// eveFile := "eveFile.txt"
 	// frankFile := "frankFile.txt"
 	// graceFile := "graceFile.txt"
@@ -288,8 +288,12 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 			})
 
-			Specify("Attempt to initialize a user with an modify attack.", func() {
-				userlib.DebugMsg("Attempting to initialize a user with an modify attack.")
+			Specify("Attempt to get a user with an modify attack.", func() {
+				userlib.DebugMsg("Initializing user Alice.")
+				_, err = client.InitUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attempting to get a user with an modify attack.")
 				userlib.DebugMsg("Attacker modify you datastore under userUUID")
 				userUUID, _ := uuid.FromBytes(userlib.Hash([]byte("alice"))[:16])
 				userlib.DatastoreSet(userUUID, []byte("modifyit"))
@@ -297,11 +301,27 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 			})
 
-			Specify("Attempt to initialize a user with an delete attack.", func() {
-				userlib.DebugMsg("Attempting to initialize a user with an delete attack.")
+			Specify("Attempt to reinitialize a user with an delete attack.", func() {
+				userlib.DebugMsg("reInitializing user Alice.")
+				_, err = client.InitUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attempting to irenitialize a user with an delete attack.")
 				userlib.DebugMsg("Attacker delete all the datastore info")
 				userlib.DatastoreClear()
 				_, err = client.InitUser("alice", defaultPassword)
+				Expect(err).ToNot(BeNil())
+			})
+
+			Specify("Attempt to get a user with an delete attack.", func() {
+				userlib.DebugMsg("reInitializing user Alice.")
+				_, err = client.InitUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attempting to irenitialize a user with an delete attack.")
+				userlib.DebugMsg("Attacker delete all the datastore info")
+				userlib.DatastoreClear()
+				_, err = client.GetUser("alice", defaultPassword)
 				Expect(err).ToNot(BeNil())
 			})
 		})
@@ -393,6 +413,44 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 			})
 
+			Specify("Different Device should load the content with same file", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Getting user Alice(aliceLaptop).")
+				aliceLaptop, err = client.GetUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+				userlib.DebugMsg("AliceLaptop loading the file")
+				data, err := aliceLaptop.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne)))
+			})
+
+			Specify("Different Device should append the content with same file", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Getting user Alice(aliceLaptop).")
+				aliceLaptop, err = client.GetUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+				userlib.DebugMsg("AliceLaptop loading the file")
+				data, err := aliceLaptop.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne)))
+
+				userlib.DebugMsg("Getting user Alice(aliceLaptop).")
+				aliceLaptop, err = client.GetUser("alice", defaultPassword)
+				Expect(err).To(BeNil())
+				userlib.DebugMsg("AliceLaptop append the file")
+				err = aliceLaptop.AppendToFile(aliceFile, []byte(contentTwo))
+				Expect(err).To(BeNil())
+				userlib.DebugMsg("Alice loading the file")
+				data, err = alice.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne + contentTwo)))
+			})
 		})
 
 		Context("Sharing, Revocation, and Access Control", func() {
@@ -403,6 +461,8 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).To(BeNil())
 				charles, err = client.InitUser("charles", defaultPassword)
 				Expect(err).To(BeNil())
+				//doris, err := client.InitUser("doris", defaultPassword)
+				//Expect(err).To(BeNil())
 
 				err = alice.StoreFile(aliceFile, []byte(contentOne))
 				Expect(err).To(BeNil())
