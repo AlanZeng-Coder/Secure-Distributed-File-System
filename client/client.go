@@ -382,6 +382,7 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		dataJson = userlib.SymDec(userdata.fileMapKey, dataJson)
 		err = json.Unmarshal(dataJson, &fileMap)
 		if err != nil {
+			//think about filemetakey change by owner
 			return err
 		}
 		//get the fileMetaData

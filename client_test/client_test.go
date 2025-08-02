@@ -452,7 +452,6 @@ var _ = Describe("Client Tests", func() {
 				Expect(data).To(Equal([]byte(contentOne + contentTwo)))
 			})
 		})
-
 		Context("Sharing, Revocation, and Access Control", func() {
 			BeforeEach(func() {
 				alice, err = client.InitUser("alice", defaultPassword)
@@ -495,6 +494,15 @@ var _ = Describe("Client Tests", func() {
 				data, err = alice.LoadFile(aliceFile)
 				Expect(err).To(BeNil())
 				Expect(data).To(Equal([]byte(contentOne + contentTwo)))
+			})
+
+			Specify("A delete invitation should return not nil", func() {
+				userlib.DebugMsg("Alice shares with Bob.")
+				invite, err := alice.CreateInvitation(aliceFile, "bob")
+				Expect(err).To(BeNil())
+				userlib.DatastoreClear()
+				err = bob.AcceptInvitation("alice", invite, bobFile)
+				Expect(err).ToNot(BeNil())
 			})
 
 			Specify("A non-owner cannot revoke access.", func() {
