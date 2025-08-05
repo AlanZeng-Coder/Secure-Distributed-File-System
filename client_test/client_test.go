@@ -338,6 +338,30 @@ var _ = Describe("Client Tests", func() {
 				err = alice.StoreFile(aliceFile, []byte(contentOne))
 				Expect(err).To(BeNil())
 
+				userlib.DebugMsg("Alice append content to file")
+				err = alice.AppendToFile(aliceFile, []byte(contentThree))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Loading the file to check if it was overwritten.")
+				data, err := alice.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne + contentThree)))
+
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Loading the file to check if it was overwritten.")
+				data, err = alice.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne)))
+			})
+
+			Specify("StoreFile should overwrite an existing file's content.", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
 				userlib.DebugMsg("Alice overwriting the file with new content.")
 				err = alice.StoreFile(aliceFile, []byte(contentThree))
 				Expect(err).To(BeNil())
@@ -363,7 +387,11 @@ var _ = Describe("Client Tests", func() {
 			Specify("Storing a file with an empty filename should fail.", func() {
 				userlib.DebugMsg("Alice attempting to store a file with an empty filename.")
 				err = alice.StoreFile("", []byte(contentOne))
-				Expect(err).ToNot(BeNil())
+				Expect(err).To(BeNil())
+
+				data, err := alice.LoadFile("")
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne)))
 			})
 
 			Specify("Appending empty content to a file should not change it.", func() {
@@ -390,6 +418,28 @@ var _ = Describe("Client Tests", func() {
 				Expect(data).To(Equal([]byte(contentOne)))
 			})
 
+			Specify("AppendToFile should return not nil under delete attack.", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attacker delete the datastore")
+				userlib.DatastoreClear()
+				err = alice.AppendToFile(aliceFile, []byte(contentOne))
+				Expect(err).ToNot(BeNil())
+			})
+
+			Specify("LoadFile should return not nil under delete attack.", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attacker delete the datastore")
+				userlib.DatastoreClear()
+				_, err = alice.LoadFile(aliceFile)
+				Expect(err).ToNot(BeNil())
+			})
+
 			Specify("StoreFile should return not nil under delete attack.", func() {
 				userlib.DebugMsg("Alice storing file with initial content.")
 				err = alice.StoreFile(aliceFile, []byte(contentOne))
@@ -401,13 +451,25 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 			})
 
+			Specify("StoreFile should return not nil under delete attack.", func() {
+				userlib.DebugMsg("Alice storing file with initial content.")
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Attacker delete the datastore")
+				fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(aliceFile + " " + "alice" + " "))[:16])
+				userlib.DatastoreDelete(fileMapUUID)
+				err = alice.StoreFile(aliceFile, []byte(contentOne))
+				Expect(err).ToNot(BeNil())
+			})
+
 			Specify("StoreFile should return not nil under modify attack.", func() {
 				userlib.DebugMsg("Alice storing file with initial content.")
 				err = alice.StoreFile(aliceFile, []byte(contentOne))
 				Expect(err).To(BeNil())
 
 				userlib.DebugMsg("Attacker modify the datastore")
-				fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(aliceFile + "alice"))[:16])
+				fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(aliceFile + " " + "alice "))[:16])
 				userlib.DatastoreSet(fileMapUUID, []byte("modifyit"))
 				err = alice.StoreFile(aliceFile, []byte(contentOne))
 				Expect(err).ToNot(BeNil())
@@ -477,23 +539,33 @@ var _ = Describe("Client Tests", func() {
 				err = alice.RevokeAccess(aliceFile, "bob")
 				Expect(err).To(BeNil())
 
-				userlib.DebugMsg("Bob tries to load the file (should fail).")
-				_, err = bob.LoadFile(bobFile)
-				Expect(err).ToNot(BeNil())
-
-				userlib.DebugMsg("Charles tries to load the file (should succeed).")
-				data, err := charles.LoadFile(charlesFile)
+				userlib.DebugMsg("Alice appends to the file.")
+				err = alice.AppendToFile(aliceFile, []byte(contentTwo))
 				Expect(err).To(BeNil())
-				Expect(data).To(Equal([]byte(contentOne)))
 
 				userlib.DebugMsg("Charles appends to the file.")
 				err = charles.AppendToFile(charlesFile, []byte(contentTwo))
 				Expect(err).To(BeNil())
 
 				userlib.DebugMsg("Alice loads the file to see Charles's changes.")
+				data, err := alice.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne + contentTwo + contentTwo)))
+
+				userlib.DebugMsg("Bob tries to load the file (should fail).")
+				_, err = bob.LoadFile(bobFile)
+				Expect(err).ToNot(BeNil())
+
+				userlib.DebugMsg("Alice tries to load the file (should succeed).")
 				data, err = alice.LoadFile(aliceFile)
 				Expect(err).To(BeNil())
-				Expect(data).To(Equal([]byte(contentOne + contentTwo)))
+				Expect(data).To(Equal([]byte(contentOne + contentTwo + contentTwo)))
+
+				userlib.DebugMsg("Charles tries to load the file (should succeed).")
+				data, err = charles.LoadFile(charlesFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne + contentTwo + contentTwo)))
+
 			})
 
 			Specify("A delete invitation should return not nil", func() {
