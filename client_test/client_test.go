@@ -672,6 +672,25 @@ var _ = Describe("Client Tests", func() {
 
 			})
 
+			Specify("An RevokeAccess to nonexist file should return not nil", func() {
+				userlib.DebugMsg("Alice shares with Bob.")
+				invite, err := alice.CreateInvitation(aliceFile, "bob")
+				Expect(err).To(BeNil())
+				err = bob.AcceptInvitation("alice", invite, bobFile)
+				Expect(err).To(BeNil())
+				userlib.DebugMsg("revokeAccess nonexist file")
+				err = alice.RevokeAccess("nonexist", "bob")
+				Expect(err).ToNot(BeNil())
+
+			})
+
+			Specify("An invitation under delete attack should return not nil", func() {
+				userlib.DebugMsg("Alice shares with Bob.")
+				userlib.DatastoreClear()
+				_, err := alice.CreateInvitation(aliceFile, "bob")
+				Expect(err).ToNot(BeNil())
+			})
+
 			Specify("An invitation with nonexist file should return not nil", func() {
 				userlib.DebugMsg("Alice shares with Bob.")
 				_, err := alice.CreateInvitation("nonexist.txt", "bob")
