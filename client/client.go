@@ -1166,8 +1166,26 @@ func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid
 		return err
 	}
 
+	// Check for the filename existion
+	//get filesInfo
+	var filesInfo *FilesInfo
+	filesInfo, err = userdata.GetFilesInfo()
+	if err != nil {
+		return err
+	}
+	fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+	// if file exist but right now datastore is empty, attacker delete the infomation
+	exist := filesInfo.Files[fileMapUUID]
+	if exist {
+		return fmt.Errorf("filename exist")
+	}
+	filesInfo.Files[fileMapUUID] = true
+	err = userdata.SetFilesInfo(filesInfo)
+	if err != nil {
+		return err
+	}
 	// Create and store FileMap
-	fileMapUUID, err := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+	fileMapUUID, err = uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
 	if err != nil {
 		return fmt.Errorf("failed to generate fileMapUUID: %v", err)
 	}
@@ -1428,22 +1446,23 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	// }
 
 	// kick the revoke user and the children from sharing Tree
+
 	owner := userdata.Username
 	users, exists := sharingTree.Tree[owner]
 	if !exists {
-		return errors.New("owner not found or has no recipients")
+		return errors.New("owner has no recipients")
 	}
 	var newUsers []string
 	found := false
 	for _, u := range users {
-		if u == recipientUsername {
+		if u != recipientUsername {
+			newUsers = append(newUsers, u)
+		} else {
 			found = true
-			continue
 		}
-		newUsers = append(newUsers, u)
 	}
 	if !found {
-		return errors.New("recipient not found in owner's list")
+		return errors.New("only owner can revoke direct recipients")
 	}
 	sharingTree.Tree[owner] = newUsers
 	if len(newUsers) == 0 {
