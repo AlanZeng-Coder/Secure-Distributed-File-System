@@ -171,33 +171,60 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdata.Username = username
 	//create master key and enc key for userUUID
 	userdata.masterKey = userlib.Argon2Key([]byte(password), []byte(username), 16)
-	masterEncKey, _ := userlib.HashKDF(userdata.masterKey, []byte("user"))
+	masterEncKey, err := userlib.HashKDF(userdata.masterKey, []byte("user"))
+	if err != nil {
+		return nil, err
+	}
 	userdata.masterEncKey = masterEncKey[:16]
 	//create all keys that I need.
-	userdata.publicKey, userdata.PrivateKey, _ = userlib.PKEKeyGen()
-	userdata.SignKey, userdata.verifyKey, _ = userlib.DSKeyGen()
+	userdata.publicKey, userdata.PrivateKey, err = userlib.PKEKeyGen()
+	if err != nil {
+		return nil, err
+	}
+	userdata.SignKey, userdata.verifyKey, err = userlib.DSKeyGen()
+	if err != nil {
+		return nil, err
+	}
 	//put public and verify key to the keyStore
 	userlib.KeystoreSet(username+"public key", userdata.publicKey)
 	userlib.KeystoreSet(username+"verify key", userdata.verifyKey)
 	//get the UUID for use
-	userdata.UserUUID, _ = uuid.FromBytes(userlib.Hash([]byte(userdata.Username))[:16])
+	userdata.UserUUID, err = uuid.FromBytes(userlib.Hash([]byte(userdata.Username))[:16])
+	if err != nil {
+		return nil, err
+	}
 	// get the filesInfoUUID and make the filesInfo
 	userdata.FilesInfoUUID = uuid.New()
-	filesInfoKey, _ := userlib.HashKDF(userdata.masterKey, []byte("filesInfo"))
+	filesInfoKey, err := userlib.HashKDF(userdata.masterKey, []byte("filesInfo"))
+	if err != nil {
+		return nil, err
+	}
 	filesInfoKey = filesInfoKey[0:16]
 	var filesInfo FilesInfo
 	filesInfo.Files = make(map[uuid.UUID]bool)
-	dataJson, _ := json.Marshal(filesInfo)
+	dataJson, err := json.Marshal(filesInfo)
+	if err != nil {
+		return nil, err
+	}
 	dataJson = userlib.SymEnc(filesInfoKey, userlib.RandomBytes(16), dataJson)
-	hmac, _ := userlib.HMACEval(filesInfoKey, dataJson)
+	hmac, err := userlib.HMACEval(filesInfoKey, dataJson)
+	if err != nil {
+		return nil, err
+	}
 
 	userlib.DatastoreSet(userdata.FilesInfoUUID, append(hmac, dataJson...))
 	//Marshal the userdata object
-	userdatabytes, _ := json.Marshal(userdata)
+	userdatabytes, err := json.Marshal(userdata)
+	if err != nil {
+		return nil, err
+	}
 	//encry userdata json
 	ciphertext := userlib.SymEnc(userdata.masterEncKey, userlib.RandomBytes(16), userdatabytes)
 	//sig it
-	sig, _ := userlib.DSSign(userdata.SignKey, ciphertext)
+	sig, err := userlib.DSSign(userdata.SignKey, ciphertext)
+	if err != nil {
+		return nil, err
+	}
 	//Store it to dataStore
 	// for userUUID, the first 256 bytes is sig.
 	userlib.DatastoreSet(userdata.UserUUID, append(sig, ciphertext...))
@@ -575,9 +602,15 @@ func (userdata *User) GetFileMap(filename string) (*FileMap, error) {
 	// Verify HMAC
 	hmac := dataJson[0:64]
 	dataJson = dataJson[64:]
-	fileMapKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+	fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+	if err != nil {
+		return nil, err
+	}
 	fileMapKey = fileMapKey[:16]
-	computerHmac, _ := userlib.HMACEval(fileMapKey, dataJson)
+	computerHmac, err := userlib.HMACEval(fileMapKey, dataJson)
+	if err != nil {
+		return nil, err
+	}
 	if !userlib.HMACEqual(computerHmac, hmac) {
 		return nil, errors.New("file map got modified")
 	}
@@ -646,7 +679,10 @@ func (userdata *User) GetFileBlockHeader(fileMetaData *FileMetaData) (*FileBlock
 	// Verify HMAC
 	hmac := dataJson[0:64]
 	dataJson = dataJson[64:]
-	computerHmac, _ := userlib.HMACEval(fileBlockKey, dataJson)
+	computerHmac, err := userlib.HMACEval(fileBlockKey, dataJson)
+	if err != nil {
+		return nil, err
+	}
 	if !userlib.HMACEqual(computerHmac, hmac) {
 		return nil, errors.New("file block header got modified")
 	}
@@ -677,7 +713,10 @@ func (userdata *User) StoreFile(filename string, content []byte) (err error) {
 		if err != nil {
 			return err
 		}
-		fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+		fileMapUUID, err := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+		if err != nil {
+			return err
+		}
 		// if file exist but right now datastore is empty, attacker delete the infomation
 		exist := filesInfo.Files[fileMapUUID]
 		if exist {
@@ -863,13 +902,16 @@ func (userdata *User) AppendToFile(filename string, content []byte) error {
 		}
 		// Update FileMap with new FileMetaKey
 		fileMap.FileMetaKey = keyInfo.FileMetaKey
-		fileMapKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+		fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+		if err != nil {
+			return err
+		}
 		fileMapKey = fileMapKey[:16]
 		if err := userdata.SetFileMap(fileMap, fileMapUUID, fileMapKey); err != nil {
 			return fmt.Errorf("failed to update FileMap: %v", err)
 		}
 		// Retry getting FileMetaData with new key
-		_, err := userdata.GetFileMetaData(fileMap, filename)
+		_, err = userdata.GetFileMetaData(fileMap, filename)
 		if err != nil {
 			return fmt.Errorf("failed to get FileMetaData after key update: %v", err)
 		}
@@ -938,7 +980,10 @@ func (userdata *User) LoadFile(filename string) (content []byte, err error) {
 		}
 		// Update FileMap with new FileMetaKey
 		fileMap.FileMetaKey = keyInfo.FileMetaKey
-		fileMapKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+		fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+		if err != nil {
+			return nil, err
+		}
 		fileMapKey = fileMapKey[:16]
 		if err := userdata.SetFileMap(fileMap, fileMapUUID, fileMapKey); err != nil {
 			return nil, fmt.Errorf("failed to update FileMap: %v", err)
@@ -1042,17 +1087,6 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 			return uuid.Nil, fmt.Errorf("user was revoked after key update: %v", err)
 		}
 
-		// Create and store Invitation with updated FileMetaKey
-		invitationUUID := uuid.New()
-		invitation := &Invitation{
-			FileMetaDataUUID: fileMap.FileMetaDataUUID,
-			FileMetaKey:      keyInfo.FileMetaKey,
-			FileOwnerName:    fileMap.OwnerName,
-		}
-		if err := userdata.SetInvitation(invitation, invitationUUID, recipientUsername); err != nil {
-			return uuid.Nil, fmt.Errorf("failed to store Invitation: %v", err)
-		}
-		return invitationUUID, nil
 	}
 
 	// Create and store Invitation with current FileMetaKey
@@ -1065,7 +1099,75 @@ func (userdata *User) CreateInvitation(filename string, recipientUsername string
 	if err := userdata.SetInvitation(invitation, invitationUUID, recipientUsername); err != nil {
 		return uuid.Nil, fmt.Errorf("failed to store Invitation: %v", err)
 	}
+	// Get FileMetaData
+	fileMetaData, err := userdata.GetFileMetaData(fileMap, filename)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	pendingUpdate := &PendingUpdate{}
+	if existing, err := userdata.GetPendingUpdate(fileMetaData.PendingUUID, fileMetaData.PendingUpdateKey); err == nil && existing != nil {
+		pendingUpdate.Updates = existing.Updates
+	}
+	pendingUpdate.Updates = append(pendingUpdate.Updates, Updates{
+		Giver:     userdata.Username,
+		Recipient: recipientUsername,
+	})
+	if err := userdata.SetPendingUpdate(pendingUpdate, fileMetaData.PendingUUID, fileMetaData.PendingUpdateKey); err != nil {
+		return uuid.Nil, err
+	}
+
 	return invitationUUID, nil
+}
+
+func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
+	// Get Invitation
+	invitation, err := userdata.GetInvitation(invitationPtr, senderUsername)
+	if err != nil {
+		return err
+	}
+
+	// Check for the filename existion
+	//get filesInfo
+	var filesInfo *FilesInfo
+	filesInfo, err = userdata.GetFilesInfo()
+	if err != nil {
+		return err
+	}
+	fileMapUUID, err := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+	if err != nil {
+		return err
+	}
+	// if file exist but right now datastore is empty, attacker delete the infomation
+	exist := filesInfo.Files[fileMapUUID]
+	if exist {
+		return fmt.Errorf("filename exist")
+	}
+	filesInfo.Files[fileMapUUID] = true
+	err = userdata.SetFilesInfo(filesInfo)
+	if err != nil {
+		return err
+	}
+	// Create and store FileMap
+	fileMapUUID, err = uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+	if err != nil {
+		return fmt.Errorf("failed to generate fileMapUUID: %v", err)
+	}
+	fileMap := &FileMap{
+		FileMetaDataUUID: invitation.FileMetaDataUUID,
+		FileMetaKey:      invitation.FileMetaKey,
+		OwnerName:        invitation.FileOwnerName,
+	}
+	fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+	if err != nil {
+		return fmt.Errorf("failed to generate fileMapKey: %v", err)
+	}
+	fileMapKey = fileMapKey[:16]
+	if err := userdata.SetFileMap(fileMap, fileMapUUID, fileMapKey); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (userdata *User) SetInvitation(invitation *Invitation, invitationUUID uuid.UUID, recipientUsername string) error {
@@ -1155,74 +1257,7 @@ func (userdata *User) GetInvitation(invitationPtr uuid.UUID, senderUsername stri
 	if err := json.Unmarshal(decryJson, &invitation); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Invitation: %v", err)
 	}
-
 	return &invitation, nil
-}
-
-func (userdata *User) AcceptInvitation(senderUsername string, invitationPtr uuid.UUID, filename string) error {
-	// Get Invitation
-	invitation, err := userdata.GetInvitation(invitationPtr, senderUsername)
-	if err != nil {
-		return err
-	}
-
-	// Check for the filename existion
-	//get filesInfo
-	var filesInfo *FilesInfo
-	filesInfo, err = userdata.GetFilesInfo()
-	if err != nil {
-		return err
-	}
-	fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
-	// if file exist but right now datastore is empty, attacker delete the infomation
-	exist := filesInfo.Files[fileMapUUID]
-	if exist {
-		return fmt.Errorf("filename exist")
-	}
-	filesInfo.Files[fileMapUUID] = true
-	err = userdata.SetFilesInfo(filesInfo)
-	if err != nil {
-		return err
-	}
-	// Create and store FileMap
-	fileMapUUID, err = uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
-	if err != nil {
-		return fmt.Errorf("failed to generate fileMapUUID: %v", err)
-	}
-	fileMap := &FileMap{
-		FileMetaDataUUID: invitation.FileMetaDataUUID,
-		FileMetaKey:      invitation.FileMetaKey,
-		OwnerName:        invitation.FileOwnerName,
-	}
-	fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
-	if err != nil {
-		return fmt.Errorf("failed to generate fileMapKey: %v", err)
-	}
-	fileMapKey = fileMapKey[:16]
-	if err := userdata.SetFileMap(fileMap, fileMapUUID, fileMapKey); err != nil {
-		return err
-	}
-
-	// Get FileMetaData
-	fileMetaData, err := userdata.GetFileMetaData(fileMap, filename)
-	if err != nil {
-		return err
-	}
-
-	// Update PendingUpdate
-	pendingUpdate := &PendingUpdate{}
-	if existing, err := userdata.GetPendingUpdate(fileMetaData.PendingUUID, fileMetaData.PendingUpdateKey); err == nil && existing != nil {
-		pendingUpdate.Updates = existing.Updates
-	}
-	pendingUpdate.Updates = append(pendingUpdate.Updates, Updates{
-		Giver:     senderUsername,
-		Recipient: userdata.Username,
-	})
-	if err := userdata.SetPendingUpdate(pendingUpdate, fileMetaData.PendingUUID, fileMetaData.PendingUpdateKey); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 type Updates struct {
@@ -1304,7 +1339,7 @@ func (userdata *User) DealPendingUpdates(filename string) error {
 	// Get FileMap and FileMetaData
 	_, err := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
 	if err != nil {
-		return fmt.Errorf("failed to generate fileMapUUID: %v", err)
+		return err
 	}
 	fileMap, err := userdata.GetFileMap(filename)
 	if err != nil {
@@ -1399,13 +1434,25 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 
 	// generate new key
 	newVersion := fileMetaData.Version + 1
-	newFileMetaKey, _ := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileMeta"+filename))
+	newFileMetaKey, err := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileMeta"+filename))
+	if err != nil {
+		return err
+	}
 	newFileMetaKey = newFileMetaKey[0:16]
-	newFileBlockKey, _ := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileBlockHeader"+filename))
+	newFileBlockKey, err := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileBlockHeader"+filename))
+	if err != nil {
+		return err
+	}
 	newFileBlockKey = newFileBlockKey[0:16]
-	newPendingUpdateKey, _ := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"pendingUpdate"+filename))
+	newPendingUpdateKey, err := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"pendingUpdate"+filename))
+	if err != nil {
+		return err
+	}
 	newPendingUpdateKey = newPendingUpdateKey[0:16]
-	newFileContentKey, _ := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileContent"+filename))
+	newFileContentKey, err := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileContent"+filename))
+	if err != nil {
+		return err
+	}
 	newFileContentKey = newFileContentKey[0:16]
 
 	// // kick the revoke user and the children from sharing Tree
@@ -1547,8 +1594,14 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 
 	// Update FileMap
 	fileMap.FileMetaKey = newFileMetaKey
-	fileMapUUID, _ := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
-	fileMapKey, _ := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+	fileMapUUID, err := uuid.FromBytes(userlib.Hash([]byte(filename + " " + userdata.Username + " "))[:16])
+	if err != nil {
+		return err
+	}
+	fileMapKey, err := userlib.HashKDF(userdata.masterKey, []byte("fileMap"+filename))
+	if err != nil {
+		return err
+	}
 	fileMapKey = fileMapKey[0:16]
 	if err := userdata.SetFileMap(fileMap, fileMapUUID, fileMapKey); err != nil {
 		return err

@@ -665,6 +665,37 @@ var _ = Describe("Client Tests", func() {
 				Expect(err).ToNot(BeNil())
 			})
 
+			Specify("After revoke user and other shared user accept invitation, they still can access", func() {
+				userlib.DebugMsg("Alice share file to Bob")
+				inviteBob, err := alice.CreateInvitation(aliceFile, "bob")
+				Expect(err).To(BeNil())
+
+				err = bob.AcceptInvitation("alice", inviteBob, bobFile)
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("alice share file to charles")
+				inviteCharles, err := alice.CreateInvitation(aliceFile, "charles")
+				Expect(err).To(BeNil())
+
+				userlib.DebugMsg("Alice attempts to revoke bob's access")
+				err = alice.RevokeAccess(aliceFile, "bob")
+				Expect(err).To(BeNil())
+
+				err = charles.AcceptInvitation("alice", inviteCharles, charlesFile)
+				Expect(err).To(BeNil())
+
+				data, err := charles.LoadFile(charlesFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne)))
+
+				err = charles.AppendToFile(charlesFile, []byte(contentTwo))
+				Expect(err).To(BeNil())
+
+				data, err = aliceDesktop.LoadFile(aliceFile)
+				Expect(err).To(BeNil())
+				Expect(data).To(Equal([]byte(contentOne + contentTwo)))
+			})
+
 			Specify("An invitation to nonexist user should return not nil", func() {
 				userlib.DebugMsg("Alice shares with Bob.")
 				_, err := alice.CreateInvitation(aliceFile, "nonexist")
