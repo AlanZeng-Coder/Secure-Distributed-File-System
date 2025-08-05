@@ -15,7 +15,6 @@ package client
 // - strings
 
 import (
-	"container/list"
 	"encoding/json"
 	"strconv"
 
@@ -1391,6 +1390,43 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 	newFileContentKey, _ := userlib.HashKDF(userdata.masterKey, []byte(strconv.Itoa(newVersion)+"fileContent"+filename))
 	newFileContentKey = newFileContentKey[0:16]
 
+	// // kick the revoke user and the children from sharing Tree
+	// owner := userdata.Username
+	// users, exists := sharingTree.Tree[owner]
+	// if !exists {
+	// 	return errors.New("owner not found or has no recipients")
+	// }
+	// var newUsers []string
+	// found := false
+	// for _, u := range users {
+	// 	if u == recipientUsername {
+	// 		found = true
+	// 		continue
+	// 	}
+	// 	newUsers = append(newUsers, u)
+	// }
+	// if !found {
+	// 	return errors.New("recipient not found in owner's list")
+	// }
+	// sharingTree.Tree[owner] = newUsers
+	// if len(newUsers) == 0 {
+	// 	delete(sharingTree.Tree, owner)
+	// }
+
+	// queue := list.New()
+	// queue.PushBack(recipientUsername)
+	// for queue.Len() > 0 {
+	// 	elem := queue.Front()
+	// 	username := elem.Value.(string)
+	// 	queue.Remove(elem)
+	// 	if children, ok := sharingTree.Tree[username]; ok {
+	// 		for _, child := range children {
+	// 			queue.PushBack(child)
+	// 		}
+	// 		delete(sharingTree.Tree, username)
+	// 	}
+	// }
+
 	// kick the revoke user and the children from sharing Tree
 	owner := userdata.Username
 	users, exists := sharingTree.Tree[owner]
@@ -1414,16 +1450,14 @@ func (userdata *User) RevokeAccess(filename string, recipientUsername string) er
 		delete(sharingTree.Tree, owner)
 	}
 
-	queue := list.New()
-	queue.PushBack(recipientUsername)
-	for queue.Len() > 0 {
-		elem := queue.Front()
-		username := elem.Value.(string)
-		queue.Remove(elem)
+	// Use a slice as a queue for BFS
+	queue := []string{recipientUsername}
+	for len(queue) > 0 {
+		username := queue[0]
+		queue = queue[1:]
+
 		if children, ok := sharingTree.Tree[username]; ok {
-			for _, child := range children {
-				queue.PushBack(child)
-			}
+			queue = append(queue, children...)
 			delete(sharingTree.Tree, username)
 		}
 	}
