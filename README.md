@@ -1,4 +1,4 @@
-# CS 161 - Project 2: Secure File System Client
+# Secure File System Client
 
 ## Project Goal
 
